@@ -125,7 +125,10 @@ async function updateActiveCell() {
       cell.load(["address", "formulas"]);
       await ctx.sync();
 
-      $("cellAddress").textContent = cell.address;
+      const displayAddr = cell.address.includes("!")
+        ? cell.address.split("!")[1]
+        : cell.address;
+      $("cellAddress").textContent = displayAddr;
       const formula = cell.formulas[0][0];
       if (typeof formula === "string" && formula.startsWith("=")) {
         $("cellFormula").textContent = formula;
