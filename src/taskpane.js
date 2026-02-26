@@ -229,8 +229,6 @@ async function scan() {
       if (!allAreas) allAreas = directAreas;
 
       // Each RangeAreas.address may contain comma-separated ranges
-      // e.g. "Sheet1!A1, Sheet1!B2, Sheet1!C3"
-      // Split them into individual addresses.
       function parseAddresses(areasCollection) {
         const addrs = [];
         for (const rangeAreas of areasCollection.items) {
@@ -241,48 +239,51 @@ async function scan() {
         return addrs;
       }
 
-      // Build a set of direct addresses for fast lookup
-      const directSet = new Set(parseAddresses(directAreas.areas));
-      const currentSheetName = sourceCell.sheetName;
-
-      // Collect all refs as a flat list
-      const allRefs = [];
-      for (const addr of parseAddresses(allAreas.areas)) {
-        const isDirect = directSet.has(addr);
+      function parseAddr(addr) {
         const bangIdx = addr.lastIndexOf("!");
         let sheetName, cellRef;
         if (bangIdx > 0) {
           sheetName = addr.substring(0, bangIdx).replace(/^'|'$/g, "");
           cellRef = addr.substring(bangIdx + 1);
         } else {
-          sheetName = currentSheetName;
+          sheetName = sourceCell.sheetName;
           cellRef = addr;
         }
-        const isOtherSheet = sheetName !== currentSheetName;
-        allRefs.push({
-          displayAddress: isOtherSheet
-            ? sheetName + "!" + cellRef
-            : cellRef,
+        const isOtherSheet = sheetName !== sourceCell.sheetName;
+        return {
+          displayAddress: isOtherSheet ? sheetName + "!" + cellRef : cellRef,
           cellRef,
           fullAddress: addr,
           sheetName,
-          isDirect,
-        });
+        };
       }
 
-      // Sort direct refs by order of appearance in the formula,
-      // then append indirect refs at the end.
-      const formulaOrder = extractFormulaRefs(formula, currentSheetName);
-      function refSortKey(item) {
-        if (!item.isDirect) return 100000;
-        // Normalize to match: strip $ and compare sheet!cell
-        const normalized = item.sheetName + "!" + item.cellRef.replace(/\$/g, "");
-        const idx = formulaOrder.indexOf(normalized);
-        return idx >= 0 ? idx : 99999;
-      }
-      allRefs.sort((a, b) => refSortKey(a) - refSortKey(b));
+      // Build direct and indirect lists separately
+      const directAddrs = parseAddresses(directAreas.areas);
+      const allAddrs = allAreas ? parseAddresses(allAreas.areas) : [];
 
-      // Now load values for each referenced range
+      // Direct items — from getDirectPrecedents
+      const directItems = directAddrs.map((a) => ({ ...parseAddr(a), isDirect: true }));
+
+      // Indirect items — from getPrecedents, excluding exact matches with direct
+      const directSet = new Set(directAddrs);
+      const indirectItems = allAddrs
+        .filter((a) => !directSet.has(a))
+        .map((a) => ({ ...parseAddr(a), isDirect: false }));
+
+      // Sort direct refs by order of appearance in the formula
+      const formulaOrder = extractFormulaRefs(formula, sourceCell.sheetName);
+      directItems.sort((a, b) => {
+        const aN = a.sheetName + "!" + a.cellRef.replace(/\$/g, "");
+        const bN = b.sheetName + "!" + b.cellRef.replace(/\$/g, "");
+        const aIdx = formulaOrder.indexOf(aN);
+        const bIdx = formulaOrder.indexOf(bN);
+        return (aIdx < 0 ? 99999 : aIdx) - (bIdx < 0 ? 99999 : bIdx);
+      });
+
+      const allRefs = [...directItems, ...indirectItems];
+
+      // Load values for each referenced range
       const refRanges = [];
       for (const item of allRefs) {
         const range = ctx.workbook.worksheets
@@ -301,16 +302,10 @@ async function scan() {
       }
 
       // ── Render ───────────────────────────────
-      const totalCount = allRefs.length;
-      const directCount = allRefs.filter((r) => r.isDirect).length;
-
       let html = `
         <div class="summary-bar">
-          <span>${totalCount} ${mode} found for ${escHtml(sourceCell.sheetName)}!${escHtml(sourceCell.address)}</span>
+          <span>${allRefs.length} ${mode} found for ${escHtml(sourceCell.sheetName)}!${escHtml(sourceCell.address)}</span>
         </div>`;
-
-      const directRefs = allRefs.filter((r) => r.isDirect);
-      const indirectRefs = allRefs.filter((r) => !r.isDirect);
 
       function renderRefList(items) {
         let out = `<ul class="ref-list">`;
@@ -328,10 +323,10 @@ async function scan() {
         return out;
       }
 
-      html += renderRefList(directRefs);
-      if (indirectRefs.length > 0) {
+      html += renderRefList(directItems);
+      if (indirectItems.length > 0) {
         html += `<div class="sheet-group-header">Indirect</div>`;
-        html += renderRefList(indirectRefs);
+        html += renderRefList(indirectItems);
       }
 
       results.innerHTML = html;
