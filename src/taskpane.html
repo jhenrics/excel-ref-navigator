@@ -74,6 +74,18 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .resolved-formula-bar {
+      display: none;
+      padding: 6px 16px;
+      background: var(--accent-light);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      color: var(--accent);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
     /* ── Controls ─────────────────────────────── */
     .controls {
@@ -330,6 +342,9 @@
     <span class="cell-address" id="cellAddress">—</span>
     <span class="cell-formula" id="cellFormula" title="">Select a cell</span>
   </div>
+
+  <!-- Resolved formula (refs → values) -->
+  <div class="resolved-formula-bar" id="resolvedFormula"></div>
 
   <!-- Controls -->
   <div class="controls">

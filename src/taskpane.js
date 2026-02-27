@@ -147,6 +147,7 @@ async function updateActiveCell() {
 // ── Main scan ──────────────────────────────────────────────────
 async function scan() {
   const results = $("results");
+  $("resolvedFormula").style.display = "none";
   results.innerHTML = `
     <div class="loading">
       <div class="spinner"></div>
@@ -297,6 +298,21 @@ async function scan() {
           val !== undefined && val !== "" ? String(val) : "(empty)";
       }
 
+      // Build resolved formula (refs replaced with values)
+      if (mode === "precedents" && hasFormula) {
+        const resolved = buildResolvedFormula(formula, directItems, sourceCell.sheetName);
+        const el = $("resolvedFormula");
+        if (resolved && resolved !== formula) {
+          el.textContent = resolved;
+          el.title = resolved;
+          el.style.display = "block";
+        } else {
+          el.style.display = "none";
+        }
+      } else {
+        $("resolvedFormula").style.display = "none";
+      }
+
       // ── Render ───────────────────────────────
       let html = `
         <div class="summary-bar">
@@ -396,6 +412,7 @@ async function navigateTo(sheetName, fullAddress) {
 
 // ── Clear ──────────────────────────────────────────────────────
 function clearResults() {
+  $("resolvedFormula").style.display = "none";
   $("results").innerHTML = `
     <div class="state-msg">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
@@ -429,6 +446,42 @@ function extractFormulaRefs(formula, currentSheet) {
     refs.push(sheet + "!" + cellRef.replace(/\$/g, ""));
   }
   return refs;
+}
+
+// ── Build resolved formula (refs → values) ─────────────────────
+// Replaces single-cell references in the formula with their display
+// values.  Range references (e.g. A1:A10) are kept as-is.
+function buildResolvedFormula(formula, refItems, currentSheet) {
+  if (!formula || !formula.startsWith("=")) return null;
+
+  // Lookup: "Sheet!Cell" (normalized, no $) → displayValue
+  const valueMap = new Map();
+  for (const item of refItems) {
+    const key = item.sheetName + "!" + item.cellRef.replace(/\$/g, "");
+    valueMap.set(key, item.displayValue);
+  }
+
+  const refPattern =
+    /(?:'[^']+'|[A-Za-z0-9_]+)!\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?|\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?/g;
+
+  return formula.replace(refPattern, (match) => {
+    const bangIdx = match.lastIndexOf("!");
+    const cellPart = bangIdx > 0 ? match.substring(bangIdx + 1) : match;
+
+    // Skip range references
+    if (cellPart.includes(":")) return match;
+
+    let sheet, cellRef;
+    if (bangIdx > 0) {
+      sheet = match.substring(0, bangIdx).replace(/^'|'$/g, "");
+      cellRef = match.substring(bangIdx + 1);
+    } else {
+      sheet = currentSheet;
+      cellRef = match;
+    }
+    const key = sheet + "!" + cellRef.replace(/\$/g, "");
+    return valueMap.has(key) ? valueMap.get(key) : match;
+  });
 }
 
 // ── Expand merged API ranges ────────────────────────────────────
