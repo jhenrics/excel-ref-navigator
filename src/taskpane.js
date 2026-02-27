@@ -178,17 +178,7 @@ async function scan() {
       // For precedents the cell must have a formula;
       // for dependents any cell can have dependents.
       if (mode === "precedents" && !hasFormula) {
-        results.innerHTML = `
-          <div class="no-formula-msg">
-            <span>⚠️</span>
-            <div>
-              <strong>${cell.address}</strong> does not contain a formula.
-              <div style="margin-top:4px;font-size:11px">
-                Select a cell with a formula to see its precedents,
-                or switch to <em>Dependents</em> mode.
-              </div>
-            </div>
-          </div>`;
+        results.innerHTML = "";
         return;
       }
 
@@ -262,17 +252,23 @@ async function scan() {
       const directAddrs = parseAddresses(directAreas.areas);
       const allAddrs = allAreas ? parseAddresses(allAreas.areas) : [];
 
-      // Direct items — from getDirectPrecedents
-      const directItems = directAddrs.map((a) => ({ ...parseAddr(a), isDirect: true }));
-
       // Indirect items — from getPrecedents, excluding exact matches with direct
       const directSet = new Set(directAddrs);
       const indirectItems = allAddrs
         .filter((a) => !directSet.has(a))
         .map((a) => ({ ...parseAddr(a), isDirect: false }));
 
-      // Sort direct refs by order of appearance in the formula
+      // Expand merged API ranges back into individual cells when the formula
+      // references them individually (API merges adjacent single-cell refs)
       const formulaOrder = extractFormulaRefs(formula, sourceCell.sheetName);
+      const expandedDirectAddrs = expandMergedRanges(
+        directAddrs, formulaOrder, sourceCell.sheetName
+      );
+
+      // Direct items — from getDirectPrecedents (with merged ranges expanded)
+      const directItems = expandedDirectAddrs.map((a) => ({ ...parseAddr(a), isDirect: true }));
+
+      // Sort direct refs by order of appearance in the formula
       directItems.sort((a, b) => {
         const aN = a.sheetName + "!" + a.cellRef.replace(/\$/g, "");
         const bN = b.sheetName + "!" + b.cellRef.replace(/\$/g, "");
@@ -433,6 +429,91 @@ function extractFormulaRefs(formula, currentSheet) {
     refs.push(sheet + "!" + cellRef.replace(/\$/g, ""));
   }
   return refs;
+}
+
+// ── Expand merged API ranges ────────────────────────────────────
+// getDirectPrecedents() merges adjacent individually-referenced cells
+// into ranges (e.g. B65,B66 → B65:B66). This splits them back when
+// the formula references them as separate cells, not as a range.
+function expandMergedRanges(addresses, formulaRefs, currentSheet) {
+  const expanded = [];
+  for (const addr of addresses) {
+    const bangIdx = addr.lastIndexOf("!");
+    let sheetPrefix = "", sheetName, cellRef;
+    if (bangIdx > 0) {
+      sheetPrefix = addr.substring(0, bangIdx + 1);
+      sheetName = sheetPrefix.replace(/^'|'$/g, "").replace(/!$/, "");
+      cellRef = addr.substring(bangIdx + 1);
+    } else {
+      sheetName = currentSheet;
+      cellRef = addr;
+    }
+
+    // Single cell — keep as-is
+    if (!cellRef.includes(":")) {
+      expanded.push(addr);
+      continue;
+    }
+
+    // Check if this exact range appears in the formula (e.g. SUM(B65:B66))
+    const normalizedRange = sheetName + "!" + cellRef.replace(/\$/g, "");
+    if (formulaRefs.includes(normalizedRange)) {
+      expanded.push(addr);
+      continue;
+    }
+
+    // Expand range into individual cells, keep those found in formula
+    const cells = expandRangeToCells(cellRef);
+    const matched = [];
+    for (const cell of cells) {
+      if (formulaRefs.includes(sheetName + "!" + cell)) {
+        matched.push(sheetPrefix + cell);
+      }
+    }
+
+    if (matched.length > 0) {
+      expanded.push(...matched);
+    } else {
+      // Formula parsing missed these refs — keep original range
+      expanded.push(addr);
+    }
+  }
+  return expanded;
+}
+
+function expandRangeToCells(cellRef) {
+  const [startRef, endRef] = cellRef.split(":");
+  const startCol = startRef.replace(/[\$\d]/g, "");
+  const startRow = parseInt(startRef.replace(/[\$A-Z]/gi, ""), 10);
+  const endCol = endRef.replace(/[\$\d]/g, "");
+  const endRow = parseInt(endRef.replace(/[\$A-Z]/gi, ""), 10);
+
+  const sc = colLetterToNum(startCol), ec = colLetterToNum(endCol);
+  const cells = [];
+  for (let r = startRow; r <= endRow; r++) {
+    for (let c = sc; c <= ec; c++) {
+      cells.push(colNumToLetter(c) + r);
+    }
+  }
+  return cells;
+}
+
+function colLetterToNum(col) {
+  let n = 0;
+  for (let i = 0; i < col.length; i++) {
+    n = n * 26 + (col.toUpperCase().charCodeAt(i) - 64);
+  }
+  return n;
+}
+
+function colNumToLetter(num) {
+  let col = "";
+  while (num > 0) {
+    const mod = (num - 1) % 26;
+    col = String.fromCharCode(65 + mod) + col;
+    num = Math.floor((num - 1) / 26);
+  }
+  return col;
 }
 
 // ── Helpers ────────────────────────────────────────────────────
