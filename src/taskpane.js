@@ -293,9 +293,10 @@ async function scan() {
 
       // Attach display values
       for (const { range, item } of refRanges) {
-        const val = range.text[0][0];
+        const row = range.text && range.text[0];
+        const val = row ? row[0] : null;
         item.displayValue =
-          val !== undefined && val !== "" ? String(val) : "(empty)";
+          val !== undefined && val !== null && val !== "" ? String(val) : "(empty)";
       }
 
       // Build resolved formula (refs replaced with values)
