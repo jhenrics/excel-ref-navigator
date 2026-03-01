@@ -496,7 +496,7 @@ function expandMergedRanges(addresses, formulaRefs, currentSheet) {
     let sheetPrefix = "", sheetName, cellRef;
     if (bangIdx > 0) {
       sheetPrefix = addr.substring(0, bangIdx + 1);
-      sheetName = sheetPrefix.replace(/^'|'$/g, "").replace(/!$/, "");
+      sheetName = addr.substring(0, bangIdx).replace(/^'|'$/g, "");
       cellRef = addr.substring(bangIdx + 1);
     } else {
       sheetName = currentSheet;
